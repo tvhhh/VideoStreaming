@@ -99,6 +99,7 @@ class ServerWorker:
 		# Process TEARDOWN request
 		elif requestType == self.TEARDOWN:
 			print("processing TEARDOWN\n")
+			self.state = self.INIT
 
 			self.clientInfo['event'].set()
 			
@@ -153,7 +154,7 @@ class ServerWorker:
 			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
-		
+
 		# Error messages
 		elif code == self.FILE_NOT_FOUND_404:
 			print("404 NOT FOUND")

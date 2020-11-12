@@ -6,6 +6,7 @@ from RtpPacket import RtpPacket
 
 class ServerWorker:
 	SETUP = 'SETUP'
+	DESCRIBE = 'DESCRIBE'
 	PLAY = 'PLAY'
 	PAUSE = 'PAUSE'
 	TEARDOWN = 'TEARDOWN'
@@ -70,12 +71,17 @@ class ServerWorker:
 				# Get the RTP/UDP port from the last line
 				self.clientInfo['rtpPort'] = request[2].split(' ')[3]
 		
+		# Process DESCRIBE request
+		elif requestType == self.DESCRIBE:
+			print("processing DESCRIBE\n")
+			self.replyRtsp(self.OK_200, seq[1], filename)
+		
 		# Process PLAY request 		
 		elif requestType == self.PLAY:
 			if self.state == self.READY:
 				print("processing PLAY\n")
 				self.state = self.PLAYING
-				
+
 				# Create a new socket for RTP/UDP
 				self.clientInfo["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 				
@@ -147,11 +153,17 @@ class ServerWorker:
 		
 		return rtpPacket.getPacket()
 		
-	def replyRtsp(self, code, seq):
+	def replyRtsp(self, code, seq, filename=None):
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
-			#print("200 OK")
-			reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
+			# reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
+			reply = "RTSP/1.0 200 OK\nCSeq: {}\nSession: {}".format(seq, self.clientInfo['session'])
+			if filename:
+				body = "\nv={}\nm=video {} RTP/AVP {}\na=control:streamid={}\na=mimetype:string;\"video/MJPEG\""\
+					.format(0, self.clientInfo['rtspPort'], 26, self.clientInfo['session'])
+				content = "\n\nContent-Base: {}\nContent-Type: {}\nContent-Length: {}"\
+					.format(filename, "application/sdp", len(body))
+				reply = reply + body + content
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
 

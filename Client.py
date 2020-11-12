@@ -1,7 +1,7 @@
 from tkinter import *
 import tkinter.messagebox as tkMessageBox
 from PIL import Image, ImageTk
-import socket, threading, sys, traceback, os
+import socket, threading, sys, traceback, os, time
 
 from RtpPacket import RtpPacket
 
@@ -39,6 +39,13 @@ class Client:
         self.exitFlag = threading.Event()
         self.setupVideo()
         self.openRtpPort()
+
+        # statistic
+        self.timeStartPlaying = 0
+        self.receiveBytes = 0
+
+        self.totalFramesReceive = 0 
+        self.goodFramesReceive = 0 # frame that have frame.num > current frame.num (so the video continue playing)
 
 
     def createWidgets(self):
@@ -80,14 +87,51 @@ class Client:
         self.totaltime.grid(row=1, column=0, padx=3, pady=3)
         self.remaintime = Label(self.master, text="- 00:00")
         self.remaintime.grid(row=1, column=3, padx=3, pady=3)
-    
+
+        # Create text fields for statistic
+        ## video rate: KB/s
+        self.videoRateSpeed = StringVar()
+        self.videoRateLabel = Label(self.master, textvariable=self.videoRateSpeed)
+        self.videoRateLabel.grid(row=3, column=0)
+        self.setVideoRate(0, 0)
+
+        ## loss rate: %
+        self.lossRatePercent = StringVar()
+        self.lossRateLabel = Label(self.master, textvariable=self.lossRatePercent)
+        self.lossRateLabel.grid(row=4, column=0)
+        self.setLossRate(0, 0)
+        
+
+    def setLossRate(self, totalFramesReceive, goodFramesReceive, detail=True):
+
+        badFramesReceive = totalFramesReceive - goodFramesReceive
+        if badFramesReceive < 0: 
+            badFramesReceive = 0
+
+        if detail:
+            self.lossRatePercent.set("bad / received (packets) = {:5d} / {:5d}".format(badFramesReceive,totalFramesReceive))
+        else:
+            self.lossRatePercent.set("loss rate = {:.2f} %".format(0 if totalFramesReceive == 0 else (1.0 - badFramesReceive/totalFramesReceive) / 100))
+
+    def resetLossRate(self):
+        self.totalFramesReceive = 0
+        self.goodFramesReceive = 0
+
+    def setVideoRate(self, period, receiveBytes, detail=False):
+        if detail:
+            self.videoRateSpeed.set("video rate = KB/sec = {:5d} / {:.2f} ".format(int(receiveBytes/1024), period))
+        else:
+            self.videoRateSpeed.set("video rate = {:.2f} KB/s".format(0 if period == 0 else (receiveBytes/period)/1024))
+
+    def resetVideoRate(self):
+        self.receiveBytes = 0
+        self.timeStartPlaying = 0
 
     def setupVideo(self):
         """Setup button handler."""
         if self.state == self.INIT:
             threading.Thread(target=self.receiveRtspReply).start()
             self.sendRtspRequest(self.SETUP)
-    
 
     def exitClient(self):
         """Teardown button handler."""
@@ -105,6 +149,9 @@ class Client:
         """Pause button handler."""
         if self.state == self.PLAYING:
             self.sendRtspRequest(self.PAUSE)
+
+            self.resetVideoRate()
+            self.resetLossRate()
     
     
     def playVideo(self):
@@ -112,6 +159,8 @@ class Client:
         if self.state == self.READY:
             threading.Thread(target=self.listenRtp).start()
             self.sendRtspRequest(self.PLAY)
+
+            self.timeStartPlaying = time.time()
     
 
     def stopVideo(self):
@@ -125,6 +174,9 @@ class Client:
         self.frameNumber = 0
         self.sendRtspRequest(self.SETUP)
         self.setupFlag.clear()
+
+        self.resetVideoRate()
+        self.resetLossRate()
     
 
     def listenRtp(self):
@@ -136,9 +188,21 @@ class Client:
                     rtpPacket = RtpPacket()
                     rtpPacket.decode(data)
                     currFrameNumber = rtpPacket.seqNum()
+
+                    # stat calculation
+                    self.totalFramesReceive += 1
+
                     if currFrameNumber > self.frameNumber:
                         self.frameNumber = currFrameNumber
                         self.updateVideo(self.writeFrame(rtpPacket.getPayload()))
+
+                        # stat calculation
+                        self.goodFramesReceive += 1
+
+                        self.receiveBytes += len(rtpPacket.getPacket())
+                        self.setVideoRate(time.time() - self.timeStartPlaying, self.receiveBytes)
+
+                    self.setLossRate(self.totalFramesReceive, self.goodFramesReceive)
             except:
                 if self.playEvent.isSet():
                     break

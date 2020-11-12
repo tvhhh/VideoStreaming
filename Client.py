@@ -1,4 +1,4 @@
-from tkinter import Button, Label
+from tkinter import *
 import tkinter.messagebox as tkMessageBox
 from PIL import Image, ImageTk
 import socket, threading, sys, traceback, os
@@ -47,29 +47,39 @@ class Client:
         self.describe = Button(self.master, width=30, padx=3, pady=3)
         self.describe['text'] = "DESCRIBE"
         self.describe['command'] = self.describeVideo
-        self.describe.grid(row=1, column=0, padx=2, pady=2)
+        self.describe.grid(row=2, column=0, padx=2, pady=2)
 
         # Create Play button
         self.play = Button(self.master, width=30, padx=3, pady=3)
         self.play['text'] = "PLAY"
         self.play['command'] = self.playVideo
-        self.play.grid(row=1, column=1, padx=2, pady=2)
+        self.play.grid(row=2, column=1, padx=2, pady=2)
 
         # Create Pause button
         self.pause = Button(self.master, width=30, padx=3, pady=3)
         self.pause['text'] = "PAUSE"
         self.pause['command'] = self.pauseVideo
-        self.pause.grid(row=1, column=2, padx=2, pady=2)
+        self.pause.grid(row=2, column=2, padx=2, pady=2)
 
         # Create Stop button
         self.stop = Button(self.master, width=30, padx=3, pady=3)
         self.stop['text'] = "STOP"
         self.stop['command'] = self.stopVideo
-        self.stop.grid(row=1, column=3, padx=2, pady=2)
+        self.stop.grid(row=2, column=3, padx=2, pady=2)
 
         # Create a label to display the movie
         self.label = Label(self.master, height=35)
         self.label.grid(row=0, column=0, columnspan=4, padx=5, pady=5)
+
+        # Create scroll bar
+        self.bar = Scale(self.master, length=500, orient=HORIZONTAL, showvalue=0)
+        self.bar.grid(row=1, column=1, columnspan=2, padx=3, pady=3)
+
+        # Create text fields for time
+        self.totaltime = Label(self.master, text="00:00 / 00:00")
+        self.totaltime.grid(row=1, column=0, padx=3, pady=3)
+        self.remaintime = Label(self.master, text="- 00:00")
+        self.remaintime.grid(row=1, column=3, padx=3, pady=3)
     
 
     def setupVideo(self):

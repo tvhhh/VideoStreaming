@@ -32,20 +32,21 @@ class Client:
         self.rtspSeq = 0
         self.sessionId = 0
         self.requestSent = -1
+        self.teardownAcked = 0
         self.frameNumber = 0
+        self.requestedFrame = -1
         self.setupFlag = threading.Event()
         self.playEvent = threading.Event()
-        self.stopFlag = threading.Event()
         self.exitFlag = threading.Event()
         self.setupVideo()
         self.openRtpPort()
 
+        self.fps = 0
+
         # statistic
         self.timeStartPlaying = 0
-        self.receiveBytes = 0
-
-        self.totalFramesReceive = 0 
-        self.goodFramesReceive = 0 # frame that have frame.num > current frame.num (so the video continue playing)
+        self.receivedBytes = 0
+        self.totalReceivedFrames = 0 
 
 
     def createWidgets(self):
@@ -78,54 +79,40 @@ class Client:
         self.label = Label(self.master, height=35)
         self.label.grid(row=0, column=0, columnspan=4, padx=5, pady=5)
 
-        # Create scroll bar
-        self.bar = Scale(self.master, length=500, orient=HORIZONTAL, showvalue=0)
-        self.bar.grid(row=1, column=1, columnspan=2, padx=3, pady=3)
+        # Create backward and forward button
+        self.backward = Button(self.master, width=30, padx=3, pady=3)
+        self.backward['text'] = "<<"
+        self.backward['command'] = self.fastBackward
+        self.backward.grid(row=1, column=1, padx=2, pady=2)
+        self.forward = Button(self.master, width=30, padx=3, pady=3)
+        self.forward['text'] = ">>"
+        self.forward['command'] = self.fastForward
+        self.forward.grid(row=1, column=2, padx=2, pady=2)
 
         # Create text fields for time
-        self.totaltime = Label(self.master, text="00:00 / 00:00")
-        self.totaltime.grid(row=1, column=0, padx=3, pady=3)
-        self.remaintime = Label(self.master, text="- 00:00")
-        self.remaintime.grid(row=1, column=3, padx=3, pady=3)
+        self.currentTime = StringVar()
+        self.currentTime.set("00:00")
+        self.currentTimeLabel = Label(self.master, textvariable=self.currentTime)
+        self.currentTimeLabel.grid(row=1, column=0, padx=3, pady=3)
+
+        self.totalTime = StringVar()
+        self.totalTime.set("00:00")
+        self.totalTimeLabel = Label(self.master, textvariable=self.totalTime)
+        self.totalTimeLabel.grid(row=1, column=3, padx=3, pady=3)
 
         # Create text fields for statistic
         ## video rate: KB/s
         self.videoRateSpeed = StringVar()
         self.videoRateLabel = Label(self.master, textvariable=self.videoRateSpeed)
-        self.videoRateLabel.grid(row=3, column=0)
+        self.videoRateLabel.grid(row=3, column=0, columnspan=4, padx=2, pady=2)
         self.setVideoRate(0, 0)
 
         ## loss rate: %
         self.lossRatePercent = StringVar()
         self.lossRateLabel = Label(self.master, textvariable=self.lossRatePercent)
-        self.lossRateLabel.grid(row=4, column=0)
+        self.lossRateLabel.grid(row=4, column=0, columnspan=4, padx=2, pady=2)
         self.setLossRate(0, 0)
-        
 
-    def setLossRate(self, totalFramesReceive, goodFramesReceive, detail=True):
-
-        badFramesReceive = totalFramesReceive - goodFramesReceive
-        if badFramesReceive < 0: 
-            badFramesReceive = 0
-
-        if detail:
-            self.lossRatePercent.set("bad / received (packets) = {:5d} / {:5d}".format(badFramesReceive,totalFramesReceive))
-        else:
-            self.lossRatePercent.set("loss rate = {:.2f} %".format(0 if totalFramesReceive == 0 else (1.0 - badFramesReceive/totalFramesReceive) / 100))
-
-    def resetLossRate(self):
-        self.totalFramesReceive = 0
-        self.goodFramesReceive = 0
-
-    def setVideoRate(self, period, receiveBytes, detail=False):
-        if detail:
-            self.videoRateSpeed.set("video rate = KB/sec = {:5d} / {:.2f} ".format(int(receiveBytes/1024), period))
-        else:
-            self.videoRateSpeed.set("video rate = {:.2f} KB/s".format(0 if period == 0 else (receiveBytes/period)/1024))
-
-    def resetVideoRate(self):
-        self.receiveBytes = 0
-        self.timeStartPlaying = 0
 
     def setupVideo(self):
         """Setup button handler."""
@@ -133,12 +120,13 @@ class Client:
             threading.Thread(target=self.receiveRtspReply).start()
             self.sendRtspRequest(self.SETUP)
 
+
     def exitClient(self):
-        """Teardown button handler."""
+        """Exit client launcher."""
+        self.exitFlag.set()
         self.clearFrame()
         self.master.destroy()
         self.rtpSocket.close()
-        self.exitFlag.set()
     
     
     def describeVideo(self):
@@ -149,60 +137,78 @@ class Client:
         """Pause button handler."""
         if self.state == self.PLAYING:
             self.sendRtspRequest(self.PAUSE)
-
-            self.resetVideoRate()
-            self.resetLossRate()
     
     
     def playVideo(self):
         """Play button handler."""
         if self.state == self.READY:
             threading.Thread(target=self.listenRtp).start()
+            self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
-
             self.timeStartPlaying = time.time()
+    
+
+    def fastForward(self):
+        if not self.state == self.INIT:
+            self.sendRtspRequest(self.PAUSE)
+            self.playEvent.wait()
+            self.requestedFrame = self.frameNumber + self.fps * 5
+            self.sendRtspRequest(self.PLAY)
+    
+
+    def fastBackward(self):
+        if not self.state == self.INIT:
+            self.sendRtspRequest(self.PAUSE)
+            self.playEvent.wait()
+            self.frameNumber -= self.fps * 5
+            self.requestedFrame = self.frameNumber
+            if self.requestedFrame < 0:
+                self.requestedFrame = 0
+            self.sendRtspRequest(self.PLAY)
     
 
     def stopVideo(self):
         """Stop button handler."""
-        self.stopFlag.set()
-        self.sendRtspRequest(self.TEARDOWN)
-        self.setupFlag.wait()
-        self.clearFrame()
-        self.rtspSeq = 0
-        self.sessionId = 0
-        self.frameNumber = 0
-        self.sendRtspRequest(self.SETUP)
-        self.setupFlag.clear()
-
-        self.resetVideoRate()
-        self.resetLossRate()
+        self.pauseVideo()
+        if tkMessageBox.askokcancel("Stop?", "Your video will be terminated."):
+            self.sendRtspRequest(self.TEARDOWN)
+            self.setupFlag.wait()
+            self.clearFrame()
+            self.resetVideoRate()
+            self.resetLossRate()
+            self.setCurrentTime(0)
+            self.rtspSeq = 0
+            self.sessionId = 0
+            self.teardownAcked = 0
+            self.frameNumber = 0
+            self.sendRtspRequest(self.SETUP)
+            self.setupFlag.clear()
+        else:
+            self.playVideo()
     
 
     def listenRtp(self):
         """Listen for RTP packets."""
         while True:
             try:
-                data = self.rtpSocket.recv(20480)
+                data = self.rtpSocket.recv(40960)
                 if data:
                     rtpPacket = RtpPacket()
                     rtpPacket.decode(data)
                     currFrameNumber = rtpPacket.seqNum()
 
-                    # stat calculation
-                    self.totalFramesReceive += 1
-
                     if currFrameNumber > self.frameNumber:
                         self.frameNumber = currFrameNumber
                         self.updateVideo(self.writeFrame(rtpPacket.getPayload()))
 
-                        # stat calculation
-                        self.goodFramesReceive += 1
+                        currentTime = self.frameNumber // self.fps
+                        self.setCurrentTime(currentTime)
 
-                        self.receiveBytes += len(rtpPacket.getPacket())
-                        self.setVideoRate(time.time() - self.timeStartPlaying, self.receiveBytes)
+                        self.receivedBytes += len(rtpPacket.getPacket())
+                        self.setVideoRate(time.time() - self.timeStartPlaying, self.receivedBytes)
 
-                    self.setLossRate(self.totalFramesReceive, self.goodFramesReceive)
+                        self.totalReceivedFrames += 1
+                        self.setLossRate(currFrameNumber, self.totalReceivedFrames)
             except:
                 if self.playEvent.isSet():
                     break
@@ -246,9 +252,10 @@ class Client:
             self.rtspSeq += 1
             request = "DESCRIBE {} RTSP/1.0\ncSeq: {}\nSession: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId))
             self.requestSent = self.DESCRIBE
-        elif requestCode == self.PLAY and self.state == self.READY:
+        elif requestCode == self.PLAY:
             self.rtspSeq += 1
-            request = "PLAY {} RTSP/1.0\ncSeq: {}\nSession: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId))
+            request = "PLAY {} RTSP/1.0\ncSeq: {}\nSession: {}\nRequestedFrame: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId), self.requestedFrame)
+            self.requestedFrame = -1
             self.requestSent = self.PLAY
         elif requestCode == self.PAUSE and self.state == self.PLAYING:
             self.rtspSeq += 1
@@ -291,6 +298,10 @@ class Client:
                 if code == 200:
                     if self.requestSent == self.SETUP:
                         self.state = self.READY
+                        frameCnt = int(reply[3].split(' ')[1])
+                        self.fps = int(reply[4].split(' ')[1])
+                        totalTime = int(frameCnt/self.fps)
+                        self.setTotalTime(totalTime)
                     elif self.requestSent == self.DESCRIBE:
                         self.writeDescriptionFile('\n'.join(reply[3:]))
                     elif self.requestSent == self.PLAY:
@@ -300,10 +311,7 @@ class Client:
                         self.playEvent.set()
                     elif self.requestSent == self.TEARDOWN:
                         self.state = self.INIT
-                        self.playEvent.set()
-                        if self.stopFlag.isSet():
-                            self.setupFlag.set()
-                            self.stopFlag.clear()
+                        self.setupFlag.set()
     
     
     def openRtpPort(self):
@@ -324,6 +332,30 @@ class Client:
         if os.path.isfile(cachename):
             os.remove(cachename)
     
+
+    def setLossRate(self, totalFrames, totalReceivedFrames):
+        lossFrames = totalFrames - totalReceivedFrames
+        if lossFrames < 0:
+            lossFrames = 0
+        packetCount = "Loss / Total (packets) = {:5d} / {:5d}".format(lossFrames,totalFrames)
+        lossRate = "Loss rate = {:.2f} %".format(0 if totalFrames == 0 else lossFrames/totalFrames*100)
+        self.lossRatePercent.set(packetCount + '\t\t' + lossRate)
+
+
+    def resetLossRate(self):
+        self.totalReceivedFrames = 0
+        self.setLossRate(0, 0)
+
+
+    def setVideoRate(self, period, receivedBytes):
+        self.videoRateSpeed.set("Video rate = {:.2f} KB/s".format(0 if period == 0 else (receivedBytes/period)/1024))
+
+
+    def resetVideoRate(self):
+        self.receivedBytes = 0
+        self.timeStartPlaying = 0
+        self.setVideoRate(0, 0)
+    
     
     def writeDescriptionFile(self, description):
         """Write description file which contains response of DESCRIBE request."""
@@ -331,10 +363,22 @@ class Client:
             f.write(description)
     
 
+    def setTotalTime(self, totalTime):
+        mm = totalTime // 60
+        ss = totalTime % 60
+        self.totalTime.set("{:02d}:{:02d}".format(mm, ss))
+    
+
+    def setCurrentTime(self, currentTime):
+        mm = currentTime // 60
+        ss = currentTime % 60
+        self.currentTime.set("{:02d}:{:02d}".format(mm, ss))
+    
+
     def handler(self):
         """Handler on explicitly closing the GUI window."""
         self.pauseVideo()
-        if tkMessageBox.askokcancel("Quit?", "Are you sure you want to quit?"):
+        if tkMessageBox.askokcancel("Quit?", "Do you really want to quit?"):
             self.exitClient()
         else:
             self.playVideo()

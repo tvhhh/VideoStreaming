@@ -24,6 +24,9 @@ class ServerWorker:
 	
 	def __init__(self, clientInfo):
 		self.clientInfo = clientInfo
+		self.requestType = ''
+		self.filename = ''
+		self.fps = 25
 		
 	def run(self):
 		threading.Thread(target=self.recvRtspRequest).start()
@@ -31,7 +34,7 @@ class ServerWorker:
 	def recvRtspRequest(self):
 		"""Receive RTSP request from the client."""
 		connSocket = self.clientInfo['rtspSocket'][0]
-		while True:            
+		while True:   
 			data = connSocket.recv(256)
 			if data:
 				print("Data received:\n" + data.decode("utf-8"))
@@ -42,22 +45,22 @@ class ServerWorker:
 		# Get the request type
 		request = data.split('\n')
 		line1 = request[0].split(' ')
-		requestType = line1[0]
+		self.requestType = line1[0]
 		
 		# Get the media file name
-		filename = line1[1]
+		self.filename = line1[1]
 		
 		# Get the RTSP sequence number 
 		seq = request[1].split(' ')
 		
 		# Process SETUP request
-		if requestType == self.SETUP:
+		if self.requestType == self.SETUP:
 			if self.state == self.INIT:
 				# Update state
 				print("processing SETUP\n")
 				
 				try:
-					self.clientInfo['videoStream'] = VideoStream(filename)
+					self.clientInfo['videoStream'] = VideoStream(self.filename)
 					self.state = self.READY
 				except IOError:
 					self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1])
@@ -72,15 +75,21 @@ class ServerWorker:
 				self.clientInfo['rtpPort'] = request[2].split(' ')[3]
 		
 		# Process DESCRIBE request
-		elif requestType == self.DESCRIBE:
+		elif self.requestType == self.DESCRIBE:
 			print("processing DESCRIBE\n")
-			self.replyRtsp(self.OK_200, seq[1], filename)
+			self.replyRtsp(self.OK_200, seq[1])
 		
 		# Process PLAY request 		
-		elif requestType == self.PLAY:
+		elif self.requestType == self.PLAY:
 			if self.state == self.READY:
 				print("processing PLAY\n")
 				self.state = self.PLAYING
+
+				requestedFrame = int(request[3].split(' ')[1])
+				frameCnt = self.clientInfo['videoStream'].frameCnt
+				if requestedFrame >= frameCnt:
+					requestedFrame = frameCnt - 1
+				self.clientInfo['requestedFrame'] = requestedFrame
 
 				# Create a new socket for RTP/UDP
 				self.clientInfo["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -93,7 +102,7 @@ class ServerWorker:
 				self.clientInfo['worker'].start()
 		
 		# Process PAUSE request
-		elif requestType == self.PAUSE:
+		elif self.requestType == self.PAUSE:
 			if self.state == self.PLAYING:
 				print("processing PAUSE\n")
 				self.state = self.READY
@@ -103,7 +112,7 @@ class ServerWorker:
 				self.replyRtsp(self.OK_200, seq[1])
 		
 		# Process TEARDOWN request
-		elif requestType == self.TEARDOWN:
+		elif self.requestType == self.TEARDOWN:
 			print("processing TEARDOWN\n")
 			self.state = self.INIT
 
@@ -117,14 +126,19 @@ class ServerWorker:
 	def sendRtp(self):
 		"""Send RTP packets over UDP."""
 		while True:
-			self.clientInfo['event'].wait(0.05) 
+			self.clientInfo['event'].wait(1/self.fps) 
 			
 			# Stop sending if request is PAUSE or TEARDOWN
 			if self.clientInfo['event'].isSet(): 
-				break 
-				
-			data = self.clientInfo['videoStream'].nextFrame()
-			if data: 
+				break
+
+			if self.clientInfo['requestedFrame'] != -1:
+				data = self.clientInfo['videoStream'].getFrame(self.clientInfo['requestedFrame'])
+				self.clientInfo['requestedFrame'] = -1
+			else:
+				data = self.clientInfo['videoStream'].nextFrame()
+			
+			if data:
 				frameNumber = self.clientInfo['videoStream'].frameNbr()
 				try:
 					address = self.clientInfo['rtspSocket'][1][0]
@@ -153,16 +167,21 @@ class ServerWorker:
 		
 		return rtpPacket.getPacket()
 		
-	def replyRtsp(self, code, seq, filename=None):
+	def replyRtsp(self, code, seq):
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
 			# reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
 			reply = "RTSP/1.0 200 OK\nCSeq: {}\nSession: {}".format(seq, self.clientInfo['session'])
-			if filename:
+			if self.requestType == self.SETUP:
+				frameCnt = self.clientInfo['videoStream'].frameCnt
+				meta = "\nFrames: {}\nFps: {}"\
+					.format(frameCnt, self.fps)
+				reply = reply + meta
+			elif self.requestType == self.DESCRIBE:
 				body = "\nv={}\nm=video {} RTP/AVP {}\na=control:streamid={}\na=mimetype:string;\"video/MJPEG\""\
 					.format(0, self.clientInfo['rtspPort'], 26, self.clientInfo['session'])
 				content = "\n\nContent-Base: {}\nContent-Type: {}\nContent-Length: {}"\
-					.format(filename, "application/sdp", len(body))
+					.format(self.filename, "application/sdp", len(body))
 				reply = reply + body + content
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())

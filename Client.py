@@ -116,6 +116,8 @@ class Client:
     def resetLossRate(self):
         self.totalFramesReceive = 0
         self.goodFramesReceive = 0
+        self.setLossRate(self.goodFramesReceive, self.totalFramesReceive)
+        
 
     def setVideoRate(self, period, receiveBytes, detail=False):
         if detail:
@@ -126,6 +128,8 @@ class Client:
     def resetVideoRate(self):
         self.receiveBytes = 0
         self.timeStartPlaying = 0
+        self.setVideoRate(time.time()-self.timeStartPlaying, self.receiveBytes)
+
 
     def setupVideo(self):
         """Setup button handler."""

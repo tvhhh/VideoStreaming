@@ -1,8 +1,8 @@
 v=0
-m=video 12000 RTP/AVP 26
-a=control:streamid=854283
+m=video 10000 RTP/AVP 26
+a=control:streamid=855921
 a=mimetype:string;"video/MJPEG"
 
-Content-Base: movie.Mjpeg
+Content-Base: .\movie.Mjpeg
 Content-Type: application/sdp
 Content-Length: 87

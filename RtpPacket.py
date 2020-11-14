@@ -5,7 +5,7 @@ HEADER_SIZE = 12
 
 class RtpPacket:
     
-    def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
+    def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, extid=0, extlen=0, *args, **kwargs):
         timestamp = int(time())
         self.header = bytearray(HEADER_SIZE)
         self.header[0] = (version << 6) | (padding << 5) | (extension << 4) | cc
@@ -20,11 +20,22 @@ class RtpPacket:
         self.header[9] = ssrc >> 16 & 255
         self.header[10] = ssrc >> 8 & 255
         self.header[11] = ssrc & 255
+        self.extensionHeader = bytearray(4*(extlen + 1))
+        self.extensionHeader[0] = extid >> 8
+        self.extensionHeader[1] = extid & 255
+        self.extensionHeader[2] = extlen >> 8
+        self.extensionHeader[3] = extlen & 255
+        self.extensionHeader[4] = kwargs['frameCnt'] >> 24
+        self.extensionHeader[5] = kwargs['frameCnt'] >> 16 & 255
+        self.extensionHeader[6] = kwargs['frameCnt'] >> 8 & 255
+        self.extensionHeader[7] = kwargs['frameCnt'] & 255
         self.payload = payload
     
-    def decode(self, data):
-        self.header = bytearray(data[:HEADER_SIZE])
-        self.payload = data[HEADER_SIZE:]
+    def decode(self, byteStream):
+        self.header = bytearray(byteStream[:HEADER_SIZE])
+        extlen = int(byteStream[HEADER_SIZE + 2] << 8 | byteStream[HEADER_SIZE + 3])
+        self.extensionHeader = bytearray(byteStream[HEADER_SIZE : (HEADER_SIZE + 4*(extlen + 1))])
+        self.payload = byteStream[(HEADER_SIZE + 4*(extlen + 1)):]
     
     def version(self):
         return int(self.header[0] >> 6)
@@ -40,6 +51,9 @@ class RtpPacket:
 
     def getPayload(self):
         return self.payload
+
+    def getFrameCnt(self):
+        return int(self.extensionHeader[4] << 24 | self.extensionHeader[5] << 16 | self.extensionHeader[6] << 8 | self.extensionHeader[7])
     
     def getPacket(self):
-        return self.header + self.payload
+        return self.header + self.extensionHeader + self.payload

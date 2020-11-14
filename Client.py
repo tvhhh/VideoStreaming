@@ -21,32 +21,40 @@ class Client:
     TEARDOWN = 4
 
     def __init__(self, master, serveraddr, serverport, rtpport, filename):
+        
+        # Create GUI
         self.master = master
         self.master.protocol("WM_DELETE_WINDOW", self.handler)
         self.createWidgets()
+
+        # Connect to server
         self.serverAddr = serveraddr
         self.serverPort = int(serverport)
         self.rtpPort = int(rtpport)
         self.filename = filename
         self.connectToServer()
+        
+        # Setup video and open rtp port
         self.rtspSeq = 0
         self.sessionId = 0
         self.requestSent = -1
-        self.teardownAcked = 0
         self.frameNumber = 0
         self.requestedFrame = -1
-        self.setupFlag = threading.Event()
-        self.playEvent = threading.Event()
-        self.exitFlag = threading.Event()
         self.setupVideo()
         self.openRtpPort()
 
+        # Frames per second
         self.fps = 0
 
-        # statistic
-        self.timeStartPlaying = 0
+        # Statistic
+        self.startTime = 0
         self.receivedBytes = 0
-        self.totalReceivedFrames = 0 
+        self.totalReceivedFrames = 0
+
+        # Some flags to handle threads
+        self.setupFlag = threading.Event()
+        self.playEvent = threading.Event()
+        self.exitFlag = threading.Event()
 
 
     def createWidgets(self):
@@ -145,7 +153,7 @@ class Client:
             threading.Thread(target=self.listenRtp).start()
             self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
-            self.timeStartPlaying = time.time()
+            self.startTime = time.time()
     
 
     def fastForward(self):
@@ -179,7 +187,6 @@ class Client:
             self.setCurrentTime(0)
             self.rtspSeq = 0
             self.sessionId = 0
-            self.teardownAcked = 0
             self.frameNumber = 0
             self.sendRtspRequest(self.SETUP)
             self.setupFlag.clear()
@@ -205,12 +212,14 @@ class Client:
                         self.setCurrentTime(currentTime)
 
                         self.receivedBytes += len(rtpPacket.getPacket())
-                        self.setVideoRate(time.time() - self.timeStartPlaying, self.receivedBytes)
+                        self.setVideoRate(time.time() - self.startTime, self.receivedBytes)
 
+                        totalFrames = rtpPacket.getFrameCnt()
                         self.totalReceivedFrames += 1
-                        self.setLossRate(currFrameNumber, self.totalReceivedFrames)
+                        self.setLossRate(totalFrames, self.totalReceivedFrames)
             except:
                 if self.playEvent.isSet():
+                    self.resetVideoRate()
                     break
     
 
@@ -254,7 +263,7 @@ class Client:
             self.requestSent = self.DESCRIBE
         elif requestCode == self.PLAY:
             self.rtspSeq += 1
-            request = "PLAY {} RTSP/1.0\ncSeq: {}\nSession: {}\nRequestedFrame: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId), self.requestedFrame)
+            request = "PLAY {} RTSP/1.0\ncSeq: {}\nSession: {}\nFrame: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId), self.requestedFrame)
             self.requestedFrame = -1
             self.requestSent = self.PLAY
         elif requestCode == self.PAUSE and self.state == self.PLAYING:
@@ -353,7 +362,7 @@ class Client:
 
     def resetVideoRate(self):
         self.receivedBytes = 0
-        self.timeStartPlaying = 0
+        self.startTime = 0
         self.setVideoRate(0, 0)
     
     

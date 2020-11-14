@@ -73,6 +73,9 @@ class ServerWorker:
 				
 				# Get the RTP/UDP port from the last line
 				self.clientInfo['rtpPort'] = request[2].split(' ')[3]
+
+				# Initialize a frame counter
+				self.frameCnt = 0
 		
 		# Process DESCRIBE request
 		elif self.requestType == self.DESCRIBE:
@@ -92,7 +95,7 @@ class ServerWorker:
 				self.clientInfo['requestedFrame'] = requestedFrame
 
 				# Create a new socket for RTP/UDP
-				self.clientInfo["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+				self.clientInfo['rtpSocket'] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 				
 				self.replyRtsp(self.OK_200, seq[1])
 				
@@ -144,6 +147,7 @@ class ServerWorker:
 					address = self.clientInfo['rtspSocket'][1][0]
 					port = int(self.clientInfo['rtpPort'])
 					self.clientInfo['rtpSocket'].sendto(self.makeRtp(data, frameNumber),(address,port))
+					self.frameCnt += 1
 				except:
 					print("Connection Error")
 					#print('-'*60)
@@ -159,11 +163,15 @@ class ServerWorker:
 		marker = 0
 		pt = 26 # MJPEG type
 		seqnum = frameNbr
-		ssrc = 0 
+		ssrc = 0
+
+		extid = 0
+		extlen = 1 # the length of the extension in 32-bit units,
+		frameCnt = self.frameCnt + 1
 		
 		rtpPacket = RtpPacket()
 		
-		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload)
+		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, extid, extlen, frameCnt=frameCnt)
 		
 		return rtpPacket.getPacket()
 		

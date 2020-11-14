@@ -8,7 +8,7 @@ class VideoStream:
 			self.reader = imageio.get_reader(filename, 'ffmpeg')
 		except:
 			raise IOError
-		self.countFrame()
+		self.frameCnt = 0
 		self.frameNum = 0
 	
 	def countFrame(self):
@@ -20,6 +20,9 @@ class VideoStream:
 				self.frameCnt += 1
 			except:
 				break
+	
+	def setFrameCnt(self, cnt):
+		self.frameCnt = cnt
 		
 	def nextFrame(self):
 		"""Get next frame."""

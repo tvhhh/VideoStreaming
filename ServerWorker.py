@@ -1,5 +1,5 @@
 from random import randint
-import sys, traceback, threading, socket
+import sys, traceback, threading, socket, os
 
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
@@ -10,10 +10,13 @@ class ServerWorker:
 	PLAY = 'PLAY'
 	PAUSE = 'PAUSE'
 	TEARDOWN = 'TEARDOWN'
+	SWITCH = 'SWITCH'
+	GET_LIST = 'GET_LIST'
 	
 	INIT = 0
 	READY = 1
 	PLAYING = 2
+	SWITCHING = 3
 	state = INIT
 
 	OK_200 = 0
@@ -21,9 +24,11 @@ class ServerWorker:
 	CON_ERR_500 = 2
 	
 	clientInfo = {}
+	serverInfo = {}
 	
-	def __init__(self, clientInfo):
+	def __init__(self, clientInfo, serverInfo):
 		self.clientInfo = clientInfo
+		self.serverInfo = serverInfo
 		self.requestType = ''
 		self.filename = ''
 		self.fps = 25
@@ -34,7 +39,7 @@ class ServerWorker:
 	def recvRtspRequest(self):
 		"""Receive RTSP request from the client."""
 		connSocket = self.clientInfo['rtspSocket'][0]
-		while True:   
+		while True:
 			data = connSocket.recv(256)
 			if data:
 				print("Data received:\n" + data.decode("utf-8"))
@@ -55,7 +60,7 @@ class ServerWorker:
 		
 		# Process SETUP request
 		if self.requestType == self.SETUP:
-			if self.state == self.INIT:
+			if self.state == self.INIT or self.state == self.SWITCHING:
 				# Update state
 				print("processing SETUP\n")
 				
@@ -89,7 +94,7 @@ class ServerWorker:
 				self.state = self.PLAYING
 
 				requestedFrame = int(request[3].split(' ')[1])
-				frameCnt = self.clientInfo['videoStream'].frameCnt
+				frameCnt = self.serverInfo[self.filename]
 				if requestedFrame >= frameCnt:
 					requestedFrame = frameCnt - 1
 				self.clientInfo['requestedFrame'] = requestedFrame
@@ -125,7 +130,26 @@ class ServerWorker:
 			
 			# Close the RTP socket
 			self.clientInfo['rtpSocket'].close()
+		
+		# Process SWITCH request
+		elif self.requestType == self.SWITCH:
+			print("processing SWITCH\n")
+			self.state = self.SWITCHING
+
+			self.clientInfo['event'].set()
 			
+			self.replyRtsp(self.OK_200, seq[1])
+			
+			# Close the RTP socket
+			self.clientInfo['rtpSocket'].close()
+		
+		# Process GET_LIST request
+		elif self.requestType == self.GET_LIST:
+			print("processing GET_LIST\n")
+
+			self.replyRtsp(self.OK_200, seq[1])
+			
+	
 	def sendRtp(self):
 		"""Send RTP packets over UDP."""
 		while True:
@@ -180,17 +204,25 @@ class ServerWorker:
 		if code == self.OK_200:
 			# reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
 			reply = "RTSP/1.0 200 OK\nCSeq: {}\nSession: {}".format(seq, self.clientInfo['session'])
+			
 			if self.requestType == self.SETUP:
-				frameCnt = self.clientInfo['videoStream'].frameCnt
-				meta = "\nFrames: {}\nFps: {}"\
-					.format(frameCnt, self.fps)
+				frameCnt = self.serverInfo[self.filename]
+				meta = "\nFrames: {}\nFps: {}".format(frameCnt, self.fps)
 				reply = reply + meta
+			
 			elif self.requestType == self.DESCRIBE:
 				body = "\nv={}\nm=video {} RTP/AVP {}\na=control:streamid={}\na=mimetype:string;\"video/MJPEG\""\
 					.format(0, self.clientInfo['rtspPort'], 26, self.clientInfo['session'])
 				content = "\n\nContent-Base: {}\nContent-Type: {}\nContent-Length: {}"\
 					.format(self.filename, "application/sdp", len(body))
 				reply = reply + body + content
+			
+			elif self.requestType == self.GET_LIST:
+				lst = ""
+				for vid in self.serverInfo:
+					lst = lst + '\n' + vid
+				reply = reply + lst
+			
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())
 
@@ -199,3 +231,4 @@ class ServerWorker:
 			print("404 NOT FOUND")
 		elif code == self.CON_ERR_500:
 			print("500 CONNECTION ERROR")
+	

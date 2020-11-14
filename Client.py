@@ -12,6 +12,7 @@ class Client:
     INIT = 0
     READY = 1
     PLAYING = 2
+    SWITCHING = 3
     state = INIT
 
     SETUP = 0
@@ -19,6 +20,8 @@ class Client:
     PLAY = 2
     PAUSE = 3
     TEARDOWN = 4
+    SWITCH = 5
+    GET_LIST = 6
 
     def __init__(self, master, serveraddr, serverport, rtpport, filename):
         
@@ -121,6 +124,31 @@ class Client:
         self.lossRateLabel.grid(row=4, column=0, columnspan=4, padx=2, pady=2)
         self.setLossRate(0, 0)
 
+        # Menu listbox
+        self.listMenu = Listbox(self.master, height=35, width=40, bg='#EBECF0', highlightcolor='#D3D3D3', selectmode=SINGLE)
+        self.listMenu.grid(row=0, column=4, padx=5, pady=5)
+
+        # Create switch button
+        self.switch = Button(self.master, width=20, padx=3, pady=3)
+        self.switch['text'] = "SWITCH"
+        self.switch['command'] = self.switchVideo
+        self.switch.grid(row=1, column=4, padx=2, pady=2)
+
+        # Create refresh button
+        self.refresh = Button(self.master, width=20, padx=3, pady=3)
+        self.refresh['text'] = "GET LIST"
+        self.refresh['command'] = self.getMenu
+        self.refresh.grid(row=2, column=4, padx=2, pady=2)
+    
+
+    def getMenu(self):
+        self.sendRtspRequest(self.GET_LIST)
+    
+
+    def setMenu(self, vlist):
+        for idx, name in enumerate(vlist):
+            self.listMenu.insert(idx, name)
+
 
     def setupVideo(self):
         """Setup button handler."""
@@ -194,6 +222,26 @@ class Client:
             self.playVideo()
     
 
+    def switchVideo(self):
+        self.filename = str(self.listMenu.get(ACTIVE))
+        if len(self.filename) > 0:
+            self.pauseVideo()
+            if tkMessageBox.askokcancel("Switch?", "Do you want to switch?"):
+                self.sendRtspRequest(self.SWITCH)
+                self.setupFlag.wait()
+                self.clearFrame()
+                self.resetVideoRate()
+                self.resetLossRate()
+                self.setCurrentTime(0)
+                self.rtspSeq = 0
+                self.sessionId = 0
+                self.frameNumber = 0
+                self.sendRtspRequest(self.SETUP)
+                self.setupFlag.clear()
+            else:
+                self.playVideo()
+    
+
     def listenRtp(self):
         """Listen for RTP packets."""
         while True:
@@ -253,7 +301,7 @@ class Client:
 
     def sendRtspRequest(self, requestCode):
         """Send RTSP request to the server."""
-        if requestCode == self.SETUP and self.state == self.INIT:
+        if requestCode == self.SETUP and (self.state == self.INIT or self.state == self.SWITCHING):
             self.rtspSeq += 1
             request = "SETUP {} RTSP/1.0\nCSeq: {}\nTransport: RTP/UDP; client_port= {}".format(self.filename, str(self.rtspSeq), str(self.rtpPort))
             self.requestSent = self.SETUP
@@ -274,6 +322,14 @@ class Client:
             self.rtspSeq += 1
             request = "TEARDOWN {} RTSP/1.0\ncSeq: {}\nSession: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId))
             self.requestSent = self.TEARDOWN
+        elif requestCode == self.SWITCH and not self.state == self.INIT:
+            self.rtspSeq += 1
+            request = "SWITCH {} RTSP/1.0\ncSeq: {}\nSession: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId))
+            self.requestSent = self.SWITCH
+        elif requestCode == self.GET_LIST:
+            self.rtspSeq += 1
+            request = "GET_LIST RTSP/1.0\ncSeq: {}".format(str(self.rtspSeq))
+            self.requestSent = self.GET_LIST
         else:
             return
         self.rtspSocket.sendall(request.encode())
@@ -286,6 +342,9 @@ class Client:
             try:
                 reply = self.rtspSocket.recv(1024)
                 if reply:
+                    print('\n--------Reply--------\n')
+                    print(reply.decode('utf-8'))
+                    print('\n------------------------\n')
                     self.parseRtspReply(reply.decode('utf-8'))
             except:
                 if self.exitFlag.isSet():
@@ -321,6 +380,11 @@ class Client:
                     elif self.requestSent == self.TEARDOWN:
                         self.state = self.INIT
                         self.setupFlag.set()
+                    elif self.requestSent == self.SWITCH:
+                        self.state = self.SWITCHING
+                        self.setupFlag.set()
+                    elif self.requestSent == self.GET_LIST:
+                        self.setMenu(reply[3:])
     
     
     def openRtpPort(self):

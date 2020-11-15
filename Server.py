@@ -10,7 +10,7 @@ class Server:
 	def __init__(self):
 		print("Preparing server...")
 		self.getServerInfo()
-		print("Server done.")
+		print("Server done.\n")
 
 	def getServerInfo(self):
 		self.serverInfo = {}

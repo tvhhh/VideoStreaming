@@ -203,25 +203,31 @@ class ServerWorker:
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
 			# reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + str(self.clientInfo['session'])
-			reply = "RTSP/1.0 200 OK\nCSeq: {}\nSession: {}".format(seq, self.clientInfo['session'])
+			reply = "RTSP/1.0 200 OK\nCSeq: {}".format(seq)
 			
 			if self.requestType == self.SETUP:
 				frameCnt = self.serverInfo[self.filename]
+				session = "\nSession: {}".format(self.clientInfo['session'])
 				meta = "\nFrames: {}\nFps: {}".format(frameCnt, self.fps)
-				reply = reply + meta
+				reply = reply + session + meta
 			
 			elif self.requestType == self.DESCRIBE:
+				session = "\nSession: {}".format(self.clientInfo['session'])
 				body = "\nv={}\nm=video {} RTP/AVP {}\na=control:streamid={}\na=mimetype:string;\"video/MJPEG\""\
 					.format(0, self.clientInfo['rtspPort'], 26, self.clientInfo['session'])
 				content = "\n\nContent-Base: {}\nContent-Type: {}\nContent-Length: {}"\
 					.format(self.filename, "application/sdp", len(body))
-				reply = reply + body + content
+				reply = reply + session + body + content
 			
 			elif self.requestType == self.GET_LIST:
 				lst = ""
 				for vid in self.serverInfo:
 					lst = lst + '\n' + vid
 				reply = reply + lst
+
+			else:
+				session = "\nSession: {}".format(self.clientInfo['session'])
+				reply = reply + session
 			
 			connSocket = self.clientInfo['rtspSocket'][0]
 			connSocket.send(reply.encode())

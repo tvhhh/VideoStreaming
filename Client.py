@@ -30,21 +30,28 @@ class Client:
         self.master.protocol("WM_DELETE_WINDOW", self.handler)
         self.createWidgets()
 
-        # Connect to server
+        # Some flags to handle threads
+        self.setupFlag = threading.Event()
+        self.playEvent = threading.Event()
+        self.exitFlag = threading.Event()
+
+        # Set attributes
         self.serverAddr = serveraddr
         self.serverPort = int(serverport)
         self.rtpPort = int(rtpport)
         self.filename = filename
-        self.connectToServer()
-        
-        # Setup video and open rtp port
+
         self.rtspSeq = 0
         self.sessionId = 0
         self.requestSent = -1
         self.frameNumber = 0
         self.requestedFrame = -1
+
+        # Conect to server
+        self.connectToServer()
+        
+        # Setup video and open rtp port
         self.setupVideo()
-        self.openRtpPort()
 
         # Frames per second
         self.fps = 0
@@ -53,11 +60,6 @@ class Client:
         self.startTime = 0
         self.receivedBytes = 0
         self.totalReceivedFrames = 0
-
-        # Some flags to handle threads
-        self.setupFlag = threading.Event()
-        self.playEvent = threading.Event()
-        self.exitFlag = threading.Event()
 
 
     def createWidgets(self):
@@ -133,28 +135,19 @@ class Client:
         self.switch['text'] = "SWITCH"
         self.switch['command'] = self.switchVideo
         self.switch.grid(row=1, column=4, padx=2, pady=2)
-
-        # Create refresh button
-        self.refresh = Button(self.master, width=20, padx=3, pady=3)
-        self.refresh['text'] = "GET LIST"
-        self.refresh['command'] = self.getMenu
-        self.refresh.grid(row=2, column=4, padx=2, pady=2)
     
 
-    def getMenu(self):
-        self.sendRtspRequest(self.GET_LIST)
-    
-
-    def setMenu(self, vlist):
-        for idx, name in enumerate(vlist):
+    def setListMenu(self, lst):
+        for idx, name in enumerate(lst):
             self.listMenu.insert(idx, name)
 
 
     def setupVideo(self):
         """Setup button handler."""
         if self.state == self.INIT:
-            threading.Thread(target=self.receiveRtspReply).start()
             self.sendRtspRequest(self.SETUP)
+            self.openRtpPort()
+            self.setupFlag.clear()
 
 
     def exitClient(self):
@@ -178,7 +171,6 @@ class Client:
     def playVideo(self):
         """Play button handler."""
         if self.state == self.READY:
-            threading.Thread(target=self.listenRtp).start()
             self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
             self.startTime = time.time()
@@ -295,6 +287,10 @@ class Client:
         self.rtspSocket.settimeout(0.5)
         try:
             self.rtspSocket.connect((self.serverAddr, self.serverPort))
+            self.sendRtspRequest(self.GET_LIST)
+            threading.Thread(target=self.receiveRtspReply).start()
+            self.setupFlag.wait()
+            self.setListMenu(self.videoList)
         except:
             tkMessageBox.showwarning('Connection Failed', 'Connection to \'%s\' failed.' %self.serverAddr)
 
@@ -310,6 +306,7 @@ class Client:
             request = "DESCRIBE {} RTSP/1.0\ncSeq: {}\nSession: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId))
             self.requestSent = self.DESCRIBE
         elif requestCode == self.PLAY:
+            threading.Thread(target=self.listenRtp).start()
             self.rtspSeq += 1
             request = "PLAY {} RTSP/1.0\ncSeq: {}\nSession: {}\nFrame: {}".format(self.filename, str(self.rtspSeq), str(self.sessionId), self.requestedFrame)
             self.requestedFrame = -1
@@ -358,10 +355,11 @@ class Client:
         reply = data.split('\n')
         seq = int(reply[1].split(' ')[1])
         if seq == self.rtspSeq:
-            session = int(reply[2].split(' ')[1])
-            if self.sessionId == 0:
-                self.sessionId = session
-            if session == self.sessionId:
+            if not self.requestSent == self.GET_LIST:
+                session = int(reply[2].split(' ')[1])
+                if self.sessionId == 0:
+                    self.sessionId = session
+            if self.requestSent == self.GET_LIST or session == self.sessionId:
                 code = int(reply[0].split(' ')[1])
                 if code == 200:
                     if self.requestSent == self.SETUP:
@@ -384,7 +382,8 @@ class Client:
                         self.state = self.SWITCHING
                         self.setupFlag.set()
                     elif self.requestSent == self.GET_LIST:
-                        self.setMenu(reply[3:])
+                        self.videoList = reply[2:]
+                        self.setupFlag.set()
     
     
     def openRtpPort(self):

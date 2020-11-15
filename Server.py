@@ -4,6 +4,7 @@ from ServerWorker import ServerWorker
 from VideoStream import VideoStream
 
 VIDEO_FILE_EXT = ('.webm','.mpg','.mp2','.mpeg','.mpe','.mpv','.mjpeg','.mp4','.m4p','.m4v','.avi','.wmv','.mov','.qt')
+VIDEO_DIR = os.getcwd()
 
 class Server:
 
@@ -14,7 +15,7 @@ class Server:
 
 	def getServerInfo(self):
 		self.serverInfo = {}
-		for file in os.listdir(os.getcwd()):
+		for file in os.listdir(VIDEO_DIR):
 			if file.endswith(VIDEO_FILE_EXT):
 				videoSream = VideoStream(file)
 				videoSream.countFrame()
